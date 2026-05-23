@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloudanix Installers</title>
+<meta name="description" content="One-line installers for Cloudanix products.">
+<style>
+  :root {
+    --fg:        #1a1d23;
+    --fg-muted:  #5b6471;
+    --bg:        #fafbfc;
+    --bg-card:   #ffffff;
+    --accent:    #0066cc;
+    --border:    #e3e6ea;
+    --code-bg:   #f4f6f8;
+    --code-fg:   #2e3338;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg:        #e6e8eb;
+      --fg-muted:  #9aa3af;
+      --bg:        #0e1014;
+      --bg-card:   #161a20;
+      --accent:    #5aa3ff;
+      --border:    #232932;
+      --code-bg:   #1a1f27;
+      --code-fg:   #d4dae2;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 760px; margin: 0 auto; padding: 48px 24px 96px; }
+  header h1 {
+    font-size: 32px;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  header p.tagline {
+    color: var(--fg-muted);
+    margin: 0 0 40px;
+    font-size: 17px;
+  }
+  .product {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px 28px;
+    margin-bottom: 20px;
+  }
+  .product h2 {
+    margin: 0 0 4px;
+    font-size: 20px;
+  }
+  .product p.summary {
+    margin: 0 0 16px;
+    color: var(--fg-muted);
+    font-size: 15px;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 14px 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                 monospace;
+    margin: 12px 0 0;
+    border: 1px solid var(--border);
+  }
+  details {
+    margin-top: 14px;
+    font-size: 14px;
+    color: var(--fg-muted);
+  }
+  details summary {
+    cursor: pointer;
+    user-select: none;
+    color: var(--accent);
+  }
+  details summary:hover { text-decoration: underline; }
+  footer {
+    margin-top: 56px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    color: var(--fg-muted);
+    font-size: 13px;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  .audit-note {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 32px 0 0;
+    font-size: 14px;
+    color: var(--fg-muted);
+  }
+  .audit-note strong { color: var(--fg); }
+  code.inline {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.92em;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>Cloudanix Installers</h1>
+    <p class="tagline">
+      One-line installers for Cloudanix products. Audit before piping
+      to bash — the scripts and their full git history are public.
+    </p>
+  </header>
+
+  <section class="product">
+    <h2>Cloudanix Guard</h2>
+    <p class="summary">
+      Pre-hook firewall for coding agents (Claude Code, Codex CLI, Kiro)
+      — inspects prompts and tool calls for secrets, PII, and sensitive
+      files before they reach the LLM.
+    </p>
+<pre>curl -fsSL https://install.cloudanix.com/cloudanix-guard \
+  | CLOUDANIX_INSTALL_TOKEN="..." bash</pre>
+    <details>
+      <summary>Options</summary>
+      <p style="margin: 12px 0 4px;">
+        Pin a specific version:
+      </p>
+<pre>curl -fsSL https://install.cloudanix.com/cloudanix-guard \
+  | CLOUDANIX_INSTALL_TOKEN="..." CLOUDANIX_VERSION="0.1.0" bash</pre>
+      <p style="margin: 14px 0 4px;">
+        <strong>Env vars go on the <code class="inline">bash</code>
+        side of the pipe</strong>, not on
+        <code class="inline">curl</code>. (Vars set before
+        <code class="inline">curl</code> don't propagate through the
+        pipe — a classic curl-pipe-bash gotcha.)
+      </p>
+      <p style="margin: 14px 0 4px;">
+        Get an install token from your Cloudanix Console
+        (<em>Settings → Install Token</em>) or contact your Cloudanix
+        administrator.
+      </p>
+    </details>
+  </section>
+
+  <div class="audit-note">
+    <strong>Reading before you run.</strong> Every installer here is
+    an MIT-licensed bash script you can review. Source:
+    <a href="https://github.com/Cloudanix/install-scripts">github.com/Cloudanix/install-scripts</a>.
+    Each script tells you exactly what it will do and prints a summary
+    before any destructive operation.
+  </div>
+
+  <footer>
+    <p>
+      © 2026 Cloudanix, Inc.
+      ·
+      <a href="https://github.com/Cloudanix/install-scripts">Source on GitHub</a>
+      ·
+      <a href="https://github.com/Cloudanix/install-scripts/issues">Report an issue</a>
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>

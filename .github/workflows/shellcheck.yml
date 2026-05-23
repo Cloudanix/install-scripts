@@ -1,0 +1,35 @@
+# Lint every shell script in the repo on PR.
+#
+# `curl ... | bash` installers are a security-sensitive surface — a
+# subtle bash bug in production has serious blast radius. ShellCheck
+# catches the classic ones (quoting, word splitting, unhandled errors)
+# before they ship.
+
+name: shellcheck
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        env:
+          # The installer source-loads _lib/common.sh at runtime; tell
+          # shellcheck where to find it so the SC1091 (can't follow
+          # non-constant source) doesn't fire.
+          SHELLCHECK_OPTS: -e SC1091 -P _lib
+        with:
+          severity: warning
+          # Scan everything that looks like a bash script. The product
+          # installers (cloudanix-guard, etc.) have no extension and
+          # are at the repo root; the lib lives under _lib/.
+          scandir: '.'
+          additional_files: 'cloudanix-guard'

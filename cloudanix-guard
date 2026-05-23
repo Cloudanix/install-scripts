@@ -1,0 +1,319 @@
+#!/usr/bin/env bash
+# Cloudanix Guard — one-line installer.
+#
+#   curl -fsSL https://install.cloudanix.com/cloudanix-guard \
+#     | CLOUDANIX_INSTALL_TOKEN="ghp_…" bash
+#
+# IMPORTANT: env vars MUST be on the `bash` side of the pipe, not on
+# `curl`. Vars set on curl don't propagate through the pipe to bash.
+# Wrong:   FOO=bar curl ... | bash
+# Right:   curl ... | FOO=bar bash
+# Also right: FOO=bar bash <(curl ...)
+#
+# Required env:
+#   CLOUDANIX_INSTALL_TOKEN   GitHub PAT with `read:packages` (or `repo` for
+#                             private repos). Get one from the Cloudanix
+#                             Console → Settings → Install Token.
+#
+# Optional env:
+#   CLOUDANIX_VERSION         Pin a specific version, e.g. "0.1.0".
+#                             Defaults to the latest release.
+#   CLOUDANIX_PYTHON          Path to a specific Python ≥ 3.9. Auto-detected
+#                             from PATH otherwise.
+#   CLOUDANIX_INSTALL_DIR     Where to put the venv. Defaults to
+#                             ~/.cloudanix-guard/venv .
+#   NO_COLOR                  Disable colour output.
+#
+# Exit codes:
+#   0   success
+#   1   user-facing error (missing token, no Python, etc.)
+#   2   network / GitHub API error
+#
+# This installer is open source (MIT). Audit at:
+#   https://github.com/Cloudanix/install-scripts/blob/main/cloudanix-guard
+
+set -euo pipefail
+
+# ─── source the shared helpers ──────────────────────────────────────
+
+INSTALL_BASE="${CLOUDANIX_INSTALL_BASE:-https://install.cloudanix.com}"
+
+if [ -n "${CLOUDANIX_LOCAL_LIB:-}" ] && [ -f "${CLOUDANIX_LOCAL_LIB}" ]; then
+  # shellcheck source=_lib/common.sh
+  source "${CLOUDANIX_LOCAL_LIB}"
+else
+  # Fetch common.sh to a real temp file so we can:
+  #   1. Check the HTTP fetch succeeded (the obvious one).
+  #   2. Check the body is non-empty (catches a 200-with-empty-body
+  #      misconfiguration on the CDN — `source <(curl ...)` would
+  #      silently treat an empty body as "sourced 0 functions" and
+  #      then die a few lines down with `cdx::init_strict: command
+  #      not found`, which is a baffling user-facing error).
+  COMMON_URL="${INSTALL_BASE}/_lib/common.sh"
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "error: 'curl' is required to fetch installer helpers." >&2
+    exit 1
+  fi
+  _cdx_lib_tmp="$(mktemp -t "cloudanix-install-lib.XXXXXX")"
+  trap 'rm -f "${_cdx_lib_tmp}"' EXIT
+  if ! curl -fsSL "${COMMON_URL}" -o "${_cdx_lib_tmp}"; then
+    echo "error: failed to fetch installer helpers from ${COMMON_URL}" >&2
+    echo "       (DNS or network issue? Try setting CLOUDANIX_INSTALL_BASE.)" >&2
+    exit 2
+  fi
+  if [ ! -s "${_cdx_lib_tmp}" ]; then
+    echo "error: ${COMMON_URL} returned an empty body." >&2
+    exit 2
+  fi
+  # shellcheck disable=SC1090
+  source "${_cdx_lib_tmp}"
+fi
+
+cdx::init_strict
+
+# ─── product-specific config ────────────────────────────────────────
+
+readonly PRODUCT="cloudanix-guard"
+readonly REPO="Cloudanix/cloudanix-coding-agent-guard"
+readonly DEFAULT_INSTALL_DIR="${HOME}/.cloudanix-guard"
+readonly LAUNCHER_DIR="${DEFAULT_INSTALL_DIR}/bin"
+readonly LAUNCHER_PATH="${LAUNCHER_DIR}/${PRODUCT}"
+
+INSTALL_DIR="${CLOUDANIX_INSTALL_DIR:-${DEFAULT_INSTALL_DIR}/venv}"
+VERSION="${CLOUDANIX_VERSION:-latest}"
+
+# ─── preflight ──────────────────────────────────────────────────────
+
+main() {
+  cdx::banner "${PRODUCT}" "${VERSION}"
+  cdx::step "Preflight"
+
+  cdx::require_cmd curl
+  cdx::detect_os
+  cdx::info "host: ${CDX_OS}/${CDX_ARCH}"
+  if [ "${CDX_OS}" = "windows" ]; then
+    cdx::die "Windows is not yet supported. macOS and Linux only."
+  fi
+
+  local py
+  py="$(cdx::python_bin)"
+  cdx::info "python: ${py} ($("${py}" -V 2>&1))"
+  cdx::ensure_pip "${py}"
+
+  # Allocate the install-time tmpdir HERE in main(). cdx::ensure_tmpdir
+  # registers an EXIT trap; that trap MUST live in the top-level
+  # shell, not in a subshell, or the dir is removed the instant any
+  # `$(...)` substitution that touched it returns. The wheel
+  # download writes into this dir; if the trap fires too early the
+  # wheel vanishes before pip sees it.
+  cdx::ensure_tmpdir
+
+  # ─── resolve the wheel ───────────────────────────────────────────
+
+  cdx::step "Resolving release"
+
+  WHEEL_PATH=""  # set by download_wheel / local-wheel branch below
+  if [ -n "${CLOUDANIX_LOCAL_WHEEL:-}" ]; then
+    [ -f "${CLOUDANIX_LOCAL_WHEEL}" ] \
+      || cdx::die "CLOUDANIX_LOCAL_WHEEL=${CLOUDANIX_LOCAL_WHEEL} is not a file"
+    WHEEL_PATH="${CLOUDANIX_LOCAL_WHEEL}"
+    cdx::info "using local wheel: ${WHEEL_PATH}"
+  else
+    local token
+    token=$(cdx::resolve_token CLOUDANIX_INSTALL_TOKEN \
+      "Get one from the Cloudanix Console → Settings → Install Token.")
+    # download_wheel writes to WHEEL_PATH directly (no $() subshell)
+    # so the EXIT trap in main()'s shell stays the only thing managing
+    # the tmpdir's lifecycle.
+    download_wheel "${token}" "${VERSION}"
+    cdx::ok "downloaded: $(basename "${WHEEL_PATH}")"
+  fi
+  local wheel_path="${WHEEL_PATH}"
+
+  # ─── install ─────────────────────────────────────────────────────
+
+  cdx::step "Installing"
+
+  ensure_venv "${py}"
+  pip_install_local "${INSTALL_DIR}" "${wheel_path}"
+  install_launcher "${INSTALL_DIR}" "${LAUNCHER_PATH}"
+
+  cdx::ok "installed at: ${INSTALL_DIR}"
+  cdx::ok "launcher:    ${LAUNCHER_PATH}"
+
+  # ─── next steps ──────────────────────────────────────────────────
+
+  cdx::step "Next steps"
+  print_next_steps "${LAUNCHER_PATH}"
+}
+
+# ─── GitHub Releases asset download ─────────────────────────────────
+#
+# Public GitHub releases serve assets at /releases/download/<tag>/<name>.
+# Private releases require the GitHub API /releases/assets/<id> endpoint
+# with an Authorization header. We always use the API path so the same
+# code works whether the repo is public or private.
+
+# Writes the downloaded wheel path into the global WHEEL_PATH.
+# Doesn't return via stdout — that would force the caller into a
+# `$()` subshell, which is exactly the trap-scope hazard we're
+# avoiding. CDX_TMPDIR must already be set by main() calling
+# cdx::ensure_tmpdir.
+download_wheel() {
+  local token="$1"
+  local version="$2"
+  local tmp="${CDX_TMPDIR}"
+  [ -n "$tmp" ] || cdx::die "internal: CDX_TMPDIR not initialised"
+
+  # Resolve the release tag — either `latest` or a pinned version.
+  local release_json release_url
+  if [ "${version}" = "latest" ]; then
+    release_url="https://api.github.com/repos/${REPO}/releases/latest"
+  else
+    # Allow both "0.1.0" and "v0.1.0".
+    local tag="${version#v}"
+    release_url="https://api.github.com/repos/${REPO}/releases/tags/v${tag}"
+  fi
+
+  cdx::info "querying ${release_url}"
+  release_json="$(curl -fsSL \
+    -H "Authorization: Bearer ${token}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "${release_url}")" || {
+      cdx::err "GitHub API request failed."
+      cdx::err "Check that your token is valid and has read:packages (or repo) scope."
+      exit 2
+    }
+
+  # Find the .whl asset. There should be exactly one per release.
+  # Use python (we already verified it's available) for the JSON parse —
+  # avoids jq as a dependency, and bash regex on JSON is a nightmare.
+  local py; py="$(cdx::python_bin)"
+  local asset_info
+  asset_info="$(printf '%s' "${release_json}" | "${py}" -c '
+import json, sys
+data = json.load(sys.stdin)
+assets = data.get("assets", [])
+wheels = [a for a in assets if a.get("name", "").endswith(".whl")]
+if not wheels:
+    sys.stderr.write("no .whl asset found on release " + data.get("tag_name", "?") + "\n")
+    sys.exit(2)
+if len(wheels) > 1:
+    sys.stderr.write("multiple .whl assets found; expected one. Got: " +
+                     ", ".join(a["name"] for a in wheels) + "\n")
+    sys.exit(2)
+a = wheels[0]
+print(a["id"])
+print(a["name"])
+print(data.get("tag_name", ""))
+')" || exit 2
+
+  local asset_id asset_name resolved_tag
+  asset_id="$(printf '%s' "${asset_info}" | sed -n '1p')"
+  asset_name="$(printf '%s' "${asset_info}" | sed -n '2p')"
+  resolved_tag="$(printf '%s' "${asset_info}" | sed -n '3p')"
+  cdx::info "release: ${resolved_tag}  asset: ${asset_name}"
+
+  local out="${tmp}/${asset_name}"
+  curl -fsSL \
+    -H "Authorization: Bearer ${token}" \
+    -H "Accept: application/octet-stream" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    -o "${out}" \
+    "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" || {
+      cdx::err "asset download failed (id=${asset_id})"
+      exit 2
+    }
+
+  WHEEL_PATH="${out}"
+}
+
+# ─── venv + pip ─────────────────────────────────────────────────────
+
+ensure_venv() {
+  local py="$1"
+  if [ -d "${INSTALL_DIR}" ] && [ -x "${INSTALL_DIR}/bin/python" ]; then
+    cdx::info "reusing existing venv at ${INSTALL_DIR}"
+    return 0
+  fi
+  cdx::info "creating venv at ${INSTALL_DIR}"
+  mkdir -p "$(dirname "${INSTALL_DIR}")"
+  "${py}" -m venv "${INSTALL_DIR}" \
+    || cdx::die "venv creation failed at ${INSTALL_DIR}"
+  cdx::pip "${INSTALL_DIR}/bin/python" install --quiet --upgrade pip \
+    || cdx::warn "pip self-upgrade inside venv failed (continuing)"
+}
+
+pip_install_local() {
+  local venv_dir="$1"
+  local wheel="$2"
+  cdx::info "pip install ${wheel}"
+  cdx::pip "${venv_dir}/bin/python" install --quiet --upgrade --force-reinstall "${wheel}" \
+    || cdx::die "pip install failed"
+}
+
+# ─── stable launcher shim ───────────────────────────────────────────
+#
+# Codex CLI hashes the exact path of every hook command and rejects
+# unknown handlers. Without a stable shim, every `cloudanix-guard
+# install codex` after a re-install picks up a new venv-relative path
+# and Codex demands re-approval. The shim makes that pain go away:
+# the path stays at ~/.cloudanix-guard/bin/cloudanix-guard for the
+# life of the install, regardless of where pip drops the venv.
+
+install_launcher() {
+  local venv_dir="$1"
+  local launcher_path="$2"
+
+  mkdir -p "$(dirname "${launcher_path}")"
+  cat > "${launcher_path}" <<EOF
+#!/usr/bin/env bash
+# Cloudanix Guard launcher shim. Generated by the installer; do not edit.
+# Points at the active venv so subsequent pip-upgrades don't invalidate
+# the path your coding agent has on file.
+exec "${venv_dir}/bin/cloudanix-guard" "\$@"
+EOF
+  chmod 0755 "${launcher_path}"
+  cdx::info "wrote launcher shim: ${launcher_path}"
+
+  # Friendly note if the launcher isn't on PATH.
+  if ! printf ':%s:' "${PATH}" | grep -q ":${LAUNCHER_DIR}:"; then
+    cdx::warn "${LAUNCHER_DIR} is not on your \$PATH"
+    cdx::warn "  Add this to your shell profile (~/.bashrc, ~/.zshrc):"
+    cdx::warn "    export PATH=\"${LAUNCHER_DIR}:\$PATH\""
+  fi
+}
+
+# ─── post-install messaging ─────────────────────────────────────────
+
+print_next_steps() {
+  local launcher="$1"
+  cat >&2 <<EOF
+
+${CDX_C_BOLD}Cloudanix Guard is installed.${CDX_C_RESET}
+
+  ${CDX_C_BOLD}1.${CDX_C_RESET} Connect to the Cloudanix Console (optional, recommended):
+
+       ${launcher} configure
+
+  ${CDX_C_BOLD}2.${CDX_C_RESET} Wire the guard into your coding agents:
+
+       ${launcher} install all      ${CDX_C_DIM}# Claude Code + Kiro + Codex${CDX_C_RESET}
+
+     Or one at a time:
+
+       ${launcher} install claude
+       ${launcher} install codex
+       ${launcher} install kiro
+
+  ${CDX_C_BOLD}3.${CDX_C_RESET} Verify:
+
+       ${launcher} status
+
+For docs: https://github.com/Cloudanix/cloudanix-coding-agent-guard
+
+EOF
+}
+
+main "$@"

@@ -1,0 +1,51 @@
+# Deploy this repo's content to GitHub Pages on every push to main.
+# The repo root is published as-is:
+#   ./cloudanix-guard   →  install.cloudanix.com/cloudanix-guard
+#   ./_lib/common.sh    →  install.cloudanix.com/_lib/common.sh
+#   ./index.html        →  install.cloudanix.com/
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+  # Allow re-deploy from the Actions UI without a code change.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one concurrent deploy. Newer pushes cancel older in-flight deploys.
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sanity-check the install scripts are executable
+        run: |
+          set -euo pipefail
+          for f in cloudanix-guard; do
+            [ -x "$f" ] || { echo "$f is not executable"; exit 1; }
+          done
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact (the whole repo)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
