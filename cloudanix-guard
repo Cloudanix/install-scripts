@@ -19,7 +19,7 @@
 #
 # Dev-only overrides (require CLOUDANIX_INSTALL_DEV=1):
 #   CLOUDANIX_INSTALL_DEV     Set to "1" to enable any of:
-#   CLOUDANIX_LOCAL_LIB         Path to a local _lib/common.sh
+#   CLOUDANIX_LOCAL_LIB         Path to a local lib/common.sh
 #   CLOUDANIX_LOCAL_WHEEL       Path to a local .whl (skips download)
 #   CLOUDANIX_INSTALL_BASE      Override install.cloudanix.com URL
 #   CLOUDANIX_ARTIFACTS_URL     Override the artifacts CDN URL
@@ -62,7 +62,7 @@ fi
 INSTALL_BASE="${CLOUDANIX_INSTALL_BASE:-https://install.cloudanix.com}"
 
 if [ -n "${CLOUDANIX_LOCAL_LIB:-}" ] && [ -f "${CLOUDANIX_LOCAL_LIB}" ]; then
-  # shellcheck source=_lib/common.sh
+  # shellcheck source=lib/common.sh
   source "${CLOUDANIX_LOCAL_LIB}"
 else
   # Fetch common.sh to a real temp file so we can:
@@ -72,7 +72,7 @@ else
   #      silently treat an empty body as "sourced 0 functions" and
   #      then die a few lines down with `cdx::init_strict: command
   #      not found`, which is a baffling user-facing error).
-  COMMON_URL="${INSTALL_BASE}/_lib/common.sh"
+  COMMON_URL="${INSTALL_BASE}/lib/common.sh"
   if ! command -v curl >/dev/null 2>&1; then
     echo "error: 'curl' is required to fetch installer helpers." >&2
     exit 1
@@ -128,7 +128,7 @@ main() {
 
   # The wheel download tmpdir's EXIT trap MUST live in main()'s shell
   # (not in a $() subshell) or the dir is removed mid-flow. See
-  # _lib/common.sh comment on cdx::ensure_tmpdir for the full story.
+  # lib/common.sh comment on cdx::ensure_tmpdir for the full story.
   cdx::ensure_tmpdir
 
   # ─── resolve + verify the wheel ──────────────────────────────────
