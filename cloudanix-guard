@@ -1,38 +1,61 @@
 #!/usr/bin/env bash
 # Cloudanix Guard — one-line installer.
 #
-#   curl -fsSL https://install.cloudanix.com/cloudanix-guard \
-#     | CLOUDANIX_INSTALL_TOKEN="ghp_…" bash
+#   curl -fsSL https://install.cloudanix.com/cloudanix-guard | bash
 #
-# IMPORTANT: env vars MUST be on the `bash` side of the pipe, not on
-# `curl`. Vars set on curl don't propagate through the pipe to bash.
-# Wrong:   FOO=bar curl ... | bash
-# Right:   curl ... | FOO=bar bash
-# Also right: FOO=bar bash <(curl ...)
-#
-# Required env:
-#   CLOUDANIX_INSTALL_TOKEN   GitHub PAT with `read:packages` (or `repo` for
-#                             private repos). Get one from the Cloudanix
-#                             Console → Settings → Install Token.
+# No GitHub token required. The wheel is published to a public
+# Cloudanix-controlled CDN repo (Cloudanix/artifacts) and verified
+# locally against a SHA256 sidecar before pip-install.
 #
 # Optional env:
-#   CLOUDANIX_VERSION         Pin a specific version, e.g. "0.1.0".
-#                             Defaults to the latest release.
-#   CLOUDANIX_PYTHON          Path to a specific Python ≥ 3.9. Auto-detected
-#                             from PATH otherwise.
+#   CLOUDANIX_VERSION         Pin a specific version, e.g. "0.1.1".
+#                             Defaults to "latest" (the alias updated
+#                             on every release).
+#   CLOUDANIX_PYTHON          Path to a specific Python ≥ 3.9.
+#                             Auto-detected from PATH otherwise.
 #   CLOUDANIX_INSTALL_DIR     Where to put the venv. Defaults to
 #                             ~/.cloudanix-guard/venv .
 #   NO_COLOR                  Disable colour output.
 #
+# Dev-only overrides (require CLOUDANIX_INSTALL_DEV=1):
+#   CLOUDANIX_INSTALL_DEV     Set to "1" to enable any of:
+#   CLOUDANIX_LOCAL_LIB         Path to a local _lib/common.sh
+#   CLOUDANIX_LOCAL_WHEEL       Path to a local .whl (skips download)
+#   CLOUDANIX_INSTALL_BASE      Override install.cloudanix.com URL
+#   CLOUDANIX_ARTIFACTS_URL     Override the artifacts CDN URL
+#
 # Exit codes:
 #   0   success
-#   1   user-facing error (missing token, no Python, etc.)
-#   2   network / GitHub API error
+#   1   user-facing error (missing Python, missing tools, dev override
+#       used without CLOUDANIX_INSTALL_DEV=1, etc.)
+#   2   network / artifact integrity error (download failed or SHA256
+#       mismatch)
 #
 # This installer is open source (MIT). Audit at:
 #   https://github.com/Cloudanix/install-scripts/blob/main/cloudanix-guard
 
 set -euo pipefail
+
+# ─── dev-only override gating ───────────────────────────────────────
+#
+# Phishing defence: a customer can be tricked into pasting
+#   CLOUDANIX_LOCAL_WHEEL=/tmp/evil.whl curl ... | bash
+# into their terminal. Requiring CLOUDANIX_INSTALL_DEV=1 makes it
+# obvious that something dev-only is happening.
+
+if [ -z "${CLOUDANIX_INSTALL_DEV:-}" ]; then
+  for _v in CLOUDANIX_LOCAL_LIB CLOUDANIX_LOCAL_WHEEL CLOUDANIX_INSTALL_BASE CLOUDANIX_ARTIFACTS_URL; do
+    # eval indirection — `${!_v}` exists only in bash, and we want this
+    # script to fail loudly on dash/sh anyway, but using eval keeps the
+    # error message symmetric across shells.
+    eval _val="\${${_v}:-}"
+    if [ -n "${_val:-}" ]; then
+      echo "error: ${_v} is a development-only override." >&2
+      echo "       Set CLOUDANIX_INSTALL_DEV=1 to enable it." >&2
+      exit 1
+    fi
+  done
+fi
 
 # ─── source the shared helpers ──────────────────────────────────────
 
@@ -43,7 +66,7 @@ if [ -n "${CLOUDANIX_LOCAL_LIB:-}" ] && [ -f "${CLOUDANIX_LOCAL_LIB}" ]; then
   source "${CLOUDANIX_LOCAL_LIB}"
 else
   # Fetch common.sh to a real temp file so we can:
-  #   1. Check the HTTP fetch succeeded (the obvious one).
+  #   1. Check the HTTP fetch succeeded.
   #   2. Check the body is non-empty (catches a 200-with-empty-body
   #      misconfiguration on the CDN — `source <(curl ...)` would
   #      silently treat an empty body as "sourced 0 functions" and
@@ -58,7 +81,7 @@ else
   trap 'rm -f "${_cdx_lib_tmp}"' EXIT
   if ! curl -fsSL "${COMMON_URL}" -o "${_cdx_lib_tmp}"; then
     echo "error: failed to fetch installer helpers from ${COMMON_URL}" >&2
-    echo "       (DNS or network issue? Try setting CLOUDANIX_INSTALL_BASE.)" >&2
+    echo "       (DNS or network issue?)" >&2
     exit 2
   fi
   if [ ! -s "${_cdx_lib_tmp}" ]; then
@@ -74,15 +97,18 @@ cdx::init_strict
 # ─── product-specific config ────────────────────────────────────────
 
 readonly PRODUCT="cloudanix-guard"
-readonly REPO="Cloudanix/cloudanix-coding-agent-guard"
 readonly DEFAULT_INSTALL_DIR="${HOME}/.cloudanix-guard"
 readonly LAUNCHER_DIR="${DEFAULT_INSTALL_DIR}/bin"
 readonly LAUNCHER_PATH="${LAUNCHER_DIR}/${PRODUCT}"
 
+# Public CDN that holds the wheels. Override only via the
+# dev-gated CLOUDANIX_ARTIFACTS_URL above.
+readonly ARTIFACTS_URL="${CLOUDANIX_ARTIFACTS_URL:-https://github.com/Cloudanix/artifacts/raw/main/coding-agent-guard}"
+
 INSTALL_DIR="${CLOUDANIX_INSTALL_DIR:-${DEFAULT_INSTALL_DIR}/venv}"
 VERSION="${CLOUDANIX_VERSION:-latest}"
 
-# ─── preflight ──────────────────────────────────────────────────────
+# ─── preflight + flow ───────────────────────────────────────────────
 
 main() {
   cdx::banner "${PRODUCT}" "${VERSION}"
@@ -100,15 +126,12 @@ main() {
   cdx::info "python: ${py} ($("${py}" -V 2>&1))"
   cdx::ensure_pip "${py}"
 
-  # Allocate the install-time tmpdir HERE in main(). cdx::ensure_tmpdir
-  # registers an EXIT trap; that trap MUST live in the top-level
-  # shell, not in a subshell, or the dir is removed the instant any
-  # `$(...)` substitution that touched it returns. The wheel
-  # download writes into this dir; if the trap fires too early the
-  # wheel vanishes before pip sees it.
+  # The wheel download tmpdir's EXIT trap MUST live in main()'s shell
+  # (not in a $() subshell) or the dir is removed mid-flow. See
+  # _lib/common.sh comment on cdx::ensure_tmpdir for the full story.
   cdx::ensure_tmpdir
 
-  # ─── resolve the wheel ───────────────────────────────────────────
+  # ─── resolve + verify the wheel ──────────────────────────────────
 
   cdx::step "Resolving release"
 
@@ -117,16 +140,13 @@ main() {
     [ -f "${CLOUDANIX_LOCAL_WHEEL}" ] \
       || cdx::die "CLOUDANIX_LOCAL_WHEEL=${CLOUDANIX_LOCAL_WHEEL} is not a file"
     WHEEL_PATH="${CLOUDANIX_LOCAL_WHEEL}"
-    cdx::info "using local wheel: ${WHEEL_PATH}"
+    cdx::warn "using local wheel (skipping checksum): ${WHEEL_PATH}"
   else
-    local token
-    token=$(cdx::resolve_token CLOUDANIX_INSTALL_TOKEN \
-      "Get one from the Cloudanix Console → Settings → Install Token.")
     # download_wheel writes to WHEEL_PATH directly (no $() subshell)
     # so the EXIT trap in main()'s shell stays the only thing managing
     # the tmpdir's lifecycle.
-    download_wheel "${token}" "${VERSION}"
-    cdx::ok "downloaded: $(basename "${WHEEL_PATH}")"
+    download_wheel "${VERSION}"
+    cdx::ok "downloaded + verified: $(basename "${WHEEL_PATH}")"
   fi
   local wheel_path="${WHEEL_PATH}"
 
@@ -147,86 +167,69 @@ main() {
   print_next_steps "${LAUNCHER_PATH}"
 }
 
-# ─── GitHub Releases asset download ─────────────────────────────────
+# ─── Wheel download + SHA256 verification ───────────────────────────
 #
-# Public GitHub releases serve assets at /releases/download/<tag>/<name>.
-# Private releases require the GitHub API /releases/assets/<id> endpoint
-# with an Authorization header. We always use the API path so the same
-# code works whether the repo is public or private.
+# Wheels live at ARTIFACTS_URL as flat files named
+# cloudanix_guard-<version>-py3-none-any.whl. Each has a sibling
+# .sha256 sidecar in coreutils format ("<hex>  <name>"). We download
+# both and verify locally — if Cloudanix/artifacts is ever compromised
+# and someone publishes a malicious wheel without also publishing the
+# matching .sha256, the install aborts.
 
 # Writes the downloaded wheel path into the global WHEEL_PATH.
-# Doesn't return via stdout — that would force the caller into a
-# `$()` subshell, which is exactly the trap-scope hazard we're
-# avoiding. CDX_TMPDIR must already be set by main() calling
-# cdx::ensure_tmpdir.
+# Doesn't return via stdout — see the cdx::ensure_tmpdir comment.
 download_wheel() {
-  local token="$1"
-  local version="$2"
+  local version="$1"
   local tmp="${CDX_TMPDIR}"
   [ -n "$tmp" ] || cdx::die "internal: CDX_TMPDIR not initialised"
 
-  # Resolve the release tag — either `latest` or a pinned version.
-  local release_json release_url
-  if [ "${version}" = "latest" ]; then
-    release_url="https://api.github.com/repos/${REPO}/releases/latest"
-  else
-    # Allow both "0.1.0" and "v0.1.0".
-    local tag="${version#v}"
-    release_url="https://api.github.com/repos/${REPO}/releases/tags/v${tag}"
+  local tag="${version#v}"
+  local fn="cloudanix_guard-${tag}-py3-none-any.whl"
+  local wheel_url="${ARTIFACTS_URL}/${fn}"
+  local sha_url="${ARTIFACTS_URL}/${fn}.sha256"
+  local wheel_out="${tmp}/${fn}"
+  local sha_out="${tmp}/${fn}.sha256"
+
+  cdx::info "fetching ${wheel_url}"
+  curl -fsSL -o "${wheel_out}" "${wheel_url}" || {
+    cdx::err "wheel download failed: ${wheel_url}"
+    cdx::err "  (Is CLOUDANIX_VERSION=${version} a published release?"
+    cdx::err "   Check https://github.com/Cloudanix/artifacts/tree/main/coding-agent-guard )"
+    exit 2
+  }
+
+  cdx::info "fetching ${sha_url}"
+  curl -fsSL -o "${sha_out}" "${sha_url}" || {
+    cdx::err "SHA256 sidecar download failed: ${sha_url}"
+    cdx::err "  Refusing to install an unverified wheel."
+    exit 2
+  }
+
+  cdx::info "verifying SHA256"
+  if ! sha256_verify "${tmp}" "${fn}.sha256"; then
+    cdx::err "SHA256 mismatch on ${fn}."
+    cdx::err "  The published wheel does not match its sidecar checksum."
+    cdx::err "  This could indicate corruption in transit or tampering."
+    cdx::err "  Aborting install."
+    exit 2
   fi
 
-  cdx::info "querying ${release_url}"
-  release_json="$(curl -fsSL \
-    -H "Authorization: Bearer ${token}" \
-    -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "${release_url}")" || {
-      cdx::err "GitHub API request failed."
-      cdx::err "Check that your token is valid and has read:packages (or repo) scope."
-      exit 2
-    }
+  WHEEL_PATH="${wheel_out}"
+}
 
-  # Find the .whl asset. There should be exactly one per release.
-  # Use python (we already verified it's available) for the JSON parse —
-  # avoids jq as a dependency, and bash regex on JSON is a nightmare.
-  local py; py="$(cdx::python_bin)"
-  local asset_info
-  asset_info="$(printf '%s' "${release_json}" | "${py}" -c '
-import json, sys
-data = json.load(sys.stdin)
-assets = data.get("assets", [])
-wheels = [a for a in assets if a.get("name", "").endswith(".whl")]
-if not wheels:
-    sys.stderr.write("no .whl asset found on release " + data.get("tag_name", "?") + "\n")
-    sys.exit(2)
-if len(wheels) > 1:
-    sys.stderr.write("multiple .whl assets found; expected one. Got: " +
-                     ", ".join(a["name"] for a in wheels) + "\n")
-    sys.exit(2)
-a = wheels[0]
-print(a["id"])
-print(a["name"])
-print(data.get("tag_name", ""))
-')" || exit 2
-
-  local asset_id asset_name resolved_tag
-  asset_id="$(printf '%s' "${asset_info}" | sed -n '1p')"
-  asset_name="$(printf '%s' "${asset_info}" | sed -n '2p')"
-  resolved_tag="$(printf '%s' "${asset_info}" | sed -n '3p')"
-  cdx::info "release: ${resolved_tag}  asset: ${asset_name}"
-
-  local out="${tmp}/${asset_name}"
-  curl -fsSL \
-    -H "Authorization: Bearer ${token}" \
-    -H "Accept: application/octet-stream" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    -o "${out}" \
-    "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" || {
-      cdx::err "asset download failed (id=${asset_id})"
-      exit 2
-    }
-
-  WHEEL_PATH="${out}"
+# Verify a checksum sidecar in coreutils format. Tries sha256sum
+# (Linux default), falls back to shasum (macOS default).
+sha256_verify() {
+  local dir="$1"
+  local fname="$2"
+  if command -v sha256sum >/dev/null 2>&1; then
+    (cd "${dir}" && sha256sum -c "${fname}" >/dev/null 2>&1)
+  elif command -v shasum >/dev/null 2>&1; then
+    (cd "${dir}" && shasum -a 256 -c "${fname}" >/dev/null 2>&1)
+  else
+    cdx::err "no SHA256 utility found (need sha256sum or shasum)"
+    return 1
+  fi
 }
 
 # ─── venv + pip ─────────────────────────────────────────────────────

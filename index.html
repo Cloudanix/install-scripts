@@ -135,15 +135,14 @@
       — inspects prompts and tool calls for secrets, PII, and sensitive
       files before they reach the LLM.
     </p>
-<pre>curl -fsSL https://install.cloudanix.com/cloudanix-guard \
-  | CLOUDANIX_INSTALL_TOKEN="..." bash</pre>
+<pre>curl -fsSL https://install.cloudanix.com/cloudanix-guard | bash</pre>
     <details>
       <summary>Options</summary>
       <p style="margin: 12px 0 4px;">
         Pin a specific version:
       </p>
 <pre>curl -fsSL https://install.cloudanix.com/cloudanix-guard \
-  | CLOUDANIX_INSTALL_TOKEN="..." CLOUDANIX_VERSION="0.1.0" bash</pre>
+  | CLOUDANIX_VERSION="0.1.1" bash</pre>
       <p style="margin: 14px 0 4px;">
         <strong>Env vars go on the <code class="inline">bash</code>
         side of the pipe</strong>, not on
@@ -152,9 +151,10 @@
         pipe — a classic curl-pipe-bash gotcha.)
       </p>
       <p style="margin: 14px 0 4px;">
-        Get an install token from your Cloudanix Console
-        (<em>Settings → Install Token</em>) or contact your Cloudanix
-        administrator.
+        The installer downloads the wheel from a public Cloudanix
+        artifact mirror and verifies its SHA256 before
+        <code class="inline">pip install</code>. No GitHub token
+        required.
       </p>
     </details>
   </section>
