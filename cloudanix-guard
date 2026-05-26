@@ -72,7 +72,7 @@ else
   #      silently treat an empty body as "sourced 0 functions" and
   #      then die a few lines down with `cdx::init_strict: command
   #      not found`, which is a baffling user-facing error).
-  COMMON_URL="${INSTALL_BASE}/lib/common.sh"
+  COMMON_URL="${INSTALL_BASE}/lib/common"
   if ! command -v curl >/dev/null 2>&1; then
     echo "error: 'curl' is required to fetch installer helpers." >&2
     exit 1

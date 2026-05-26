@@ -22,7 +22,7 @@ jobs:
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@2.0.0
         env:
-          # The installer source-loads lib/common.sh at runtime; tell
+          # The installer source-loads lib/common at runtime; tell
           # shellcheck where to find it so the SC1091 (can't follow
           # non-constant source) doesn't fire.
           SHELLCHECK_OPTS: -e SC1091 -P lib
