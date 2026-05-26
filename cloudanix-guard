@@ -183,6 +183,20 @@ download_wheel() {
   local tmp="${CDX_TMPDIR}"
   [ -n "$tmp" ] || cdx::die "internal: CDX_TMPDIR not initialised"
 
+  # Resolve "latest" to a concrete version. PEP 440 requires the wheel
+  # filename to carry a real version string ("latest" wouldn't pip-install),
+  # so we publish a plain LATEST_VERSION text file alongside the wheels
+  # and read it here.
+  if [ "${version}" = "latest" ]; then
+    cdx::info "resolving latest via ${ARTIFACTS_URL}/LATEST_VERSION"
+    version="$(curl -fsSL "${ARTIFACTS_URL}/LATEST_VERSION" 2>/dev/null | tr -d '[:space:]')" || {
+      cdx::err "failed to fetch LATEST_VERSION from ${ARTIFACTS_URL}"
+      exit 2
+    }
+    [ -n "${version}" ] || cdx::die "LATEST_VERSION at ${ARTIFACTS_URL} returned empty"
+    cdx::info "latest = v${version}"
+  fi
+
   local tag="${version#v}"
   local fn="cloudanix_guard-${tag}-py3-none-any.whl"
   local wheel_url="${ARTIFACTS_URL}/${fn}"
