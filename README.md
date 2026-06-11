@@ -48,16 +48,19 @@ curl -fsSL https://install.cloudanix.com/cloudanix-guard | bash
 
 What that does (paraphrased from the [script itself](./cloudanix-guard)):
 
-1. Verifies Python ≥ 3.9 and `curl` are available.
-2. Downloads the latest wheel + its SHA256 sidecar from
+1. Verifies `curl` and `tar` are available and detects your OS/arch.
+2. Downloads the matching release archive
+   (`cloudanix-guard_<version>_<os>_<arch>.tar.gz`) + its SHA256
+   sidecar from
    `github.com/Cloudanix/artifacts/raw/main/coding-agent-guard/`.
-3. Verifies the wheel against its SHA256 — aborts on mismatch.
-4. Creates a venv at `~/.cloudanix-guard/venv` (or reuses one).
-5. `pip install`s the verified wheel into that venv.
-6. Drops a stable launcher shim at
-   `~/.cloudanix-guard/bin/cloudanix-guard` so subsequent upgrades
-   don't invalidate paths registered with other tools.
-7. Prints next-step instructions, including how to wire the guard
+3. Verifies the archive against its SHA256 — aborts on mismatch.
+4. Extracts the self-contained `cloudanix-guard` binary — no Python,
+   no runtime to manage.
+5. Installs it at the stable path
+   `~/.cloudanix-guard/bin/cloudanix-guard`, so upgrades replace the
+   binary in place and never invalidate paths other tools have
+   registered (e.g. Codex's hook trust-hash).
+6. Prints next-step instructions, including how to wire the guard
    into Claude Code / Codex / Kiro.
 
 ### Pin a version
@@ -68,17 +71,17 @@ curl -fsSL https://install.cloudanix.com/cloudanix-guard \
 ```
 
 The named version must exist in `Cloudanix/artifacts/coding-agent-guard/`
-as `cloudanix_guard-<version>-py3-none-any.whl` (with a matching
-`.sha256` sidecar). Otherwise the installer aborts with a 404 from
-the artifact CDN.
+as `cloudanix-guard_<version>_<os>_<arch>.tar.gz` (with a matching
+`.sha256` sidecar) for your platform. Otherwise the installer aborts
+with a 404 from the artifact CDN.
 
 ---
 
 ## Security posture
 
 - **Installer is MIT-licensed.** Inspect, fork, port — no restrictions.
-- **Wheel integrity is verified.** Each release ships a `.sha256`
-  sidecar published alongside the wheel; the installer downloads
+- **Binary integrity is verified.** Each release archive ships a
+  `.sha256` sidecar published alongside it; the installer downloads
   both and aborts on mismatch.
 - **No secrets in the script.** No GitHub tokens, no API keys,
   nothing read from the environment that touches an auth header.
@@ -89,11 +92,12 @@ the artifact CDN.
 - **Strict mode + ShellCheck on CI** — `set -euo pipefail`; no
   unguarded `command-not-found`; no implicit word-split bugs.
 - **Dev-only env-var overrides are gated** behind
-  `CLOUDANIX_INSTALL_DEV=1`. Without that flag, the four overrides
-  (`CLOUDANIX_LOCAL_LIB`, `CLOUDANIX_LOCAL_WHEEL`,
-  `CLOUDANIX_INSTALL_BASE`, `CLOUDANIX_ARTIFACTS_URL`) refuse to
-  apply — closes a phishing path where someone tricks a developer
-  into pasting `CLOUDANIX_LOCAL_WHEEL=/tmp/evil.whl curl … | bash`.
+  `CLOUDANIX_INSTALL_DEV=1`. Without that flag, the overrides
+  (`CLOUDANIX_LOCAL_LIB`, `CLOUDANIX_LOCAL_BINARY`,
+  `CLOUDANIX_LOCAL_TARBALL`, `CLOUDANIX_INSTALL_BASE`,
+  `CLOUDANIX_ARTIFACTS_URL`) refuse to apply — closes a phishing path
+  where someone tricks a developer into pasting
+  `CLOUDANIX_LOCAL_BINARY=/tmp/evil curl … | bash`.
 
 Found a bug? Open an issue on this repo. For sensitive disclosures
 contact `security@cloudanix.com`.

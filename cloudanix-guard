@@ -3,30 +3,31 @@
 #
 #   curl -fsSL https://install.cloudanix.com/cloudanix-guard | bash
 #
-# No GitHub token required. The wheel is published to a public
-# Cloudanix-controlled CDN repo (Cloudanix/artifacts) and verified
-# locally against a SHA256 sidecar before pip-install.
+# Installs the Cloudanix Guard binary — a single, self-contained
+# executable (no Python, no runtime to manage). The binary is published
+# to a public Cloudanix-controlled mirror (Cloudanix/artifacts) and
+# verified locally against a SHA256 sidecar before it is installed.
 #
 # Optional env:
-#   CLOUDANIX_VERSION         Pin a specific version, e.g. "0.1.1".
-#                             Defaults to "latest" (the alias updated
-#                             on every release).
-#   CLOUDANIX_PYTHON          Path to a specific Python ≥ 3.9.
-#                             Auto-detected from PATH otherwise.
-#   CLOUDANIX_INSTALL_DIR     Where to put the venv. Defaults to
-#                             ~/.cloudanix-guard/venv .
+#   CLOUDANIX_VERSION         Pin a specific version, e.g. "1.0.0".
+#                             Defaults to "latest" (the alias updated on
+#                             every release).
+#   CLOUDANIX_INSTALL_DIR     Base install dir. Defaults to
+#                             ~/.cloudanix-guard . The binary lands at
+#                             <dir>/bin/cloudanix-guard .
 #   NO_COLOR                  Disable colour output.
 #
 # Dev-only overrides (require CLOUDANIX_INSTALL_DEV=1):
 #   CLOUDANIX_INSTALL_DEV     Set to "1" to enable any of:
-#   CLOUDANIX_LOCAL_LIB         Path to a local lib/common.sh
-#   CLOUDANIX_LOCAL_WHEEL       Path to a local .whl (skips download)
+#   CLOUDANIX_LOCAL_LIB         Path to a local lib/common
+#   CLOUDANIX_LOCAL_BINARY      Path to a prebuilt binary (skips download)
+#   CLOUDANIX_LOCAL_TARBALL     Path to a local release tarball (skips download)
 #   CLOUDANIX_INSTALL_BASE      Override install.cloudanix.com URL
 #   CLOUDANIX_ARTIFACTS_URL     Override the artifacts CDN URL
 #
 # Exit codes:
 #   0   success
-#   1   user-facing error (missing Python, missing tools, dev override
+#   1   user-facing error (unsupported OS, missing tools, dev override
 #       used without CLOUDANIX_INSTALL_DEV=1, etc.)
 #   2   network / artifact integrity error (download failed or SHA256
 #       mismatch)
@@ -39,15 +40,12 @@ set -euo pipefail
 # ─── dev-only override gating ───────────────────────────────────────
 #
 # Phishing defence: a customer can be tricked into pasting
-#   CLOUDANIX_LOCAL_WHEEL=/tmp/evil.whl curl ... | bash
+#   CLOUDANIX_LOCAL_BINARY=/tmp/evil curl ... | bash
 # into their terminal. Requiring CLOUDANIX_INSTALL_DEV=1 makes it
 # obvious that something dev-only is happening.
 
 if [ -z "${CLOUDANIX_INSTALL_DEV:-}" ]; then
-  for _v in CLOUDANIX_LOCAL_LIB CLOUDANIX_LOCAL_WHEEL CLOUDANIX_INSTALL_BASE CLOUDANIX_ARTIFACTS_URL; do
-    # eval indirection — `${!_v}` exists only in bash, and we want this
-    # script to fail loudly on dash/sh anyway, but using eval keeps the
-    # error message symmetric across shells.
+  for _v in CLOUDANIX_LOCAL_LIB CLOUDANIX_LOCAL_BINARY CLOUDANIX_LOCAL_TARBALL CLOUDANIX_INSTALL_BASE CLOUDANIX_ARTIFACTS_URL; do
     eval _val="\${${_v}:-}"
     if [ -n "${_val:-}" ]; then
       echo "error: ${_v} is a development-only override." >&2
@@ -62,16 +60,15 @@ fi
 INSTALL_BASE="${CLOUDANIX_INSTALL_BASE:-https://install.cloudanix.com}"
 
 if [ -n "${CLOUDANIX_LOCAL_LIB:-}" ] && [ -f "${CLOUDANIX_LOCAL_LIB}" ]; then
-  # shellcheck source=lib/common.sh
+  # shellcheck source=lib/common
   source "${CLOUDANIX_LOCAL_LIB}"
 else
-  # Fetch common.sh to a real temp file so we can:
+  # Fetch common to a real temp file so we can:
   #   1. Check the HTTP fetch succeeded.
   #   2. Check the body is non-empty (catches a 200-with-empty-body
   #      misconfiguration on the CDN — `source <(curl ...)` would
-  #      silently treat an empty body as "sourced 0 functions" and
-  #      then die a few lines down with `cdx::init_strict: command
-  #      not found`, which is a baffling user-facing error).
+  #      silently treat an empty body as "sourced 0 functions" and then
+  #      die a few lines down with a baffling user-facing error).
   COMMON_URL="${INSTALL_BASE}/lib/common"
   if ! command -v curl >/dev/null 2>&1; then
     echo "error: 'curl' is required to fetch installer helpers." >&2
@@ -97,16 +94,23 @@ cdx::init_strict
 # ─── product-specific config ────────────────────────────────────────
 
 readonly PRODUCT="cloudanix-guard"
-readonly DEFAULT_INSTALL_DIR="${HOME}/.cloudanix-guard"
-readonly LAUNCHER_DIR="${DEFAULT_INSTALL_DIR}/bin"
-readonly LAUNCHER_PATH="${LAUNCHER_DIR}/${PRODUCT}"
+INSTALL_DIR="${CLOUDANIX_INSTALL_DIR:-${HOME}/.cloudanix-guard}"
+readonly INSTALL_DIR
+readonly BIN_DIR="${INSTALL_DIR}/bin"
+readonly LAUNCHER_PATH="${BIN_DIR}/${PRODUCT}"
 
-# Public CDN that holds the wheels. Override only via the
+# Public CDN that holds the release binaries. Override only via the
 # dev-gated CLOUDANIX_ARTIFACTS_URL above.
 readonly ARTIFACTS_URL="${CLOUDANIX_ARTIFACTS_URL:-https://github.com/Cloudanix/artifacts/raw/main/coding-agent-guard}"
 
-INSTALL_DIR="${CLOUDANIX_INSTALL_DIR:-${DEFAULT_INSTALL_DIR}/venv}"
 VERSION="${CLOUDANIX_VERSION:-latest}"
+
+# Set by the resolve step (download+extract, or a dev-provided local
+# binary/tarball). Always ends up pointing at the executable to install.
+BINARY_PATH=""
+# Set by download_tarball. Kept as a global so the tmpdir EXIT trap
+# stays in main()'s shell (see cdx::ensure_tmpdir).
+TARBALL_PATH=""
 
 # ─── preflight + flow ───────────────────────────────────────────────
 
@@ -115,78 +119,89 @@ main() {
   cdx::step "Preflight"
 
   cdx::require_cmd curl
+  cdx::require_cmd tar
   cdx::detect_os
   cdx::info "host: ${CDX_OS}/${CDX_ARCH}"
   if [ "${CDX_OS}" = "windows" ]; then
     cdx::die "Windows is not yet supported. macOS and Linux only."
   fi
+  if [ "${CDX_OS}" = "unknown" ]; then
+    cdx::die "Unsupported OS. macOS and Linux only."
+  fi
 
-  local py
-  py="$(cdx::python_bin)"
-  cdx::info "python: ${py} ($("${py}" -V 2>&1))"
-  cdx::ensure_pip "${py}"
-
-  # The wheel download tmpdir's EXIT trap MUST live in main()'s shell
-  # (not in a $() subshell) or the dir is removed mid-flow. See
-  # lib/common.sh comment on cdx::ensure_tmpdir for the full story.
+  # The tmpdir's EXIT trap MUST live in main()'s shell (not a $()
+  # subshell) or the dir is removed mid-flow. See lib/common's
+  # cdx::ensure_tmpdir for the full story.
   cdx::ensure_tmpdir
 
-  # ─── resolve + verify the wheel ──────────────────────────────────
-
   cdx::step "Resolving release"
-
-  WHEEL_PATH=""  # set by download_wheel / local-wheel branch below
-  if [ -n "${CLOUDANIX_LOCAL_WHEEL:-}" ]; then
-    [ -f "${CLOUDANIX_LOCAL_WHEEL}" ] \
-      || cdx::die "CLOUDANIX_LOCAL_WHEEL=${CLOUDANIX_LOCAL_WHEEL} is not a file"
-    WHEEL_PATH="${CLOUDANIX_LOCAL_WHEEL}"
-    cdx::warn "using local wheel (skipping checksum): ${WHEEL_PATH}"
-  else
-    # download_wheel writes to WHEEL_PATH directly (no $() subshell)
-    # so the EXIT trap in main()'s shell stays the only thing managing
-    # the tmpdir's lifecycle.
-    download_wheel "${VERSION}"
-    cdx::ok "downloaded + verified: $(basename "${WHEEL_PATH}")"
-  fi
-  local wheel_path="${WHEEL_PATH}"
-
-  # ─── install ─────────────────────────────────────────────────────
+  resolve_binary "${VERSION}"   # sets BINARY_PATH
+  cdx::ok "binary ready: $(basename "${BINARY_PATH}")"
 
   cdx::step "Installing"
-
-  ensure_venv "${py}"
-  pip_install_local "${INSTALL_DIR}" "${wheel_path}"
-  install_launcher "${INSTALL_DIR}" "${LAUNCHER_PATH}"
-
-  cdx::ok "installed at: ${INSTALL_DIR}"
-  cdx::ok "launcher:    ${LAUNCHER_PATH}"
-
-  # ─── next steps ──────────────────────────────────────────────────
+  install_binary "${BINARY_PATH}" "${LAUNCHER_PATH}"
+  cdx::ok "installed: ${LAUNCHER_PATH}"
+  note_legacy_venv
 
   cdx::step "Next steps"
   print_next_steps "${LAUNCHER_PATH}"
 }
 
-# ─── Wheel download + SHA256 verification ───────────────────────────
-#
-# Wheels live at ARTIFACTS_URL as flat files named
-# cloudanix_guard-<version>-py3-none-any.whl. Each has a sibling
-# .sha256 sidecar in coreutils format ("<hex>  <name>"). We download
-# both and verify locally — if Cloudanix/artifacts is ever compromised
-# and someone publishes a malicious wheel without also publishing the
-# matching .sha256, the install aborts.
+# ─── resolve the binary (download+verify+extract, or dev override) ──
 
-# Writes the downloaded wheel path into the global WHEEL_PATH.
-# Doesn't return via stdout — see the cdx::ensure_tmpdir comment.
-download_wheel() {
+resolve_binary() {
+  local version="$1"
+
+  if [ -n "${CLOUDANIX_LOCAL_BINARY:-}" ]; then
+    [ -f "${CLOUDANIX_LOCAL_BINARY}" ] \
+      || cdx::die "CLOUDANIX_LOCAL_BINARY=${CLOUDANIX_LOCAL_BINARY} is not a file"
+    cdx::warn "using local binary (skipping download + checksum): ${CLOUDANIX_LOCAL_BINARY}"
+    BINARY_PATH="${CLOUDANIX_LOCAL_BINARY}"
+    return 0
+  fi
+
+  local tarball
+  if [ -n "${CLOUDANIX_LOCAL_TARBALL:-}" ]; then
+    [ -f "${CLOUDANIX_LOCAL_TARBALL}" ] \
+      || cdx::die "CLOUDANIX_LOCAL_TARBALL=${CLOUDANIX_LOCAL_TARBALL} is not a file"
+    cdx::warn "using local tarball (skipping download + checksum): ${CLOUDANIX_LOCAL_TARBALL}"
+    tarball="${CLOUDANIX_LOCAL_TARBALL}"
+  else
+    download_tarball "${version}"   # sets TARBALL_PATH
+    tarball="${TARBALL_PATH}"
+    cdx::ok "downloaded + verified: $(basename "${tarball}")"
+  fi
+
+  extract_binary "${tarball}"   # sets BINARY_PATH
+}
+
+# Map the host arch (CDX_ARCH = amd64|arm64) to the token the release
+# archives use in their filename (amd64 → x86_64; arm64 unchanged).
+_goarch() {
+  case "${CDX_ARCH}" in
+    amd64) printf 'x86_64' ;;
+    *) printf '%s' "${CDX_ARCH}" ;;
+  esac
+}
+
+# Download the platform tarball + its .sha256 sidecar into CDX_TMPDIR
+# and verify. Sets the global TARBALL_PATH. Doesn't return via stdout —
+# see the cdx::ensure_tmpdir comment on why the tmpdir trap must stay in
+# main()'s shell.
+#
+# Archives are named cloudanix-guard_<version>_<os>_<arch>.tar.gz (the
+# goreleaser convention) with a sibling .sha256 sidecar in coreutils
+# format ("<hex>  <name>"). We download both and verify locally — if the
+# public mirror is ever tampered with and a malicious archive is pushed
+# without a matching sidecar, the install aborts.
+download_tarball() {
   local version="$1"
   local tmp="${CDX_TMPDIR}"
-  [ -n "$tmp" ] || cdx::die "internal: CDX_TMPDIR not initialised"
+  [ -n "${tmp}" ] || cdx::die "internal: CDX_TMPDIR not initialised"
 
-  # Resolve "latest" to a concrete version. PEP 440 requires the wheel
-  # filename to carry a real version string ("latest" wouldn't pip-install),
-  # so we publish a plain LATEST_VERSION text file alongside the wheels
-  # and read it here.
+  # Resolve "latest" to a concrete version. The archive filename must
+  # carry a real version string, so we publish a plain LATEST_VERSION
+  # text file alongside the archives and read it here.
   if [ "${version}" = "latest" ]; then
     cdx::info "resolving latest via ${ARTIFACTS_URL}/LATEST_VERSION"
     version="$(curl -fsSL "${ARTIFACTS_URL}/LATEST_VERSION" 2>/dev/null | tr -d '[:space:]')" || {
@@ -194,45 +209,45 @@ download_wheel() {
       exit 2
     }
     [ -n "${version}" ] || cdx::die "LATEST_VERSION at ${ARTIFACTS_URL} returned empty"
-    cdx::info "latest = v${version}"
+    cdx::info "latest = v${version#v}"
   fi
 
-  local tag="${version#v}"
-  local fn="cloudanix_guard-${tag}-py3-none-any.whl"
-  local wheel_url="${ARTIFACTS_URL}/${fn}"
-  local sha_url="${ARTIFACTS_URL}/${fn}.sha256"
-  local wheel_out="${tmp}/${fn}"
-  local sha_out="${tmp}/${fn}.sha256"
+  local tag arch fn url sha_url
+  tag="${version#v}"
+  arch="$(_goarch)"
+  fn="${PRODUCT}_${tag}_${CDX_OS}_${arch}.tar.gz"
+  url="${ARTIFACTS_URL}/${fn}"
+  sha_url="${url}.sha256"
 
-  cdx::info "fetching ${wheel_url}"
-  curl -fsSL -o "${wheel_out}" "${wheel_url}" || {
-    cdx::err "wheel download failed: ${wheel_url}"
-    cdx::err "  (Is CLOUDANIX_VERSION=${version} a published release?"
+  cdx::info "fetching ${url}"
+  curl -fsSL -o "${tmp}/${fn}" "${url}" || {
+    cdx::err "binary download failed: ${url}"
+    cdx::err "  (Is CLOUDANIX_VERSION=${tag} published for ${CDX_OS}/${arch}?"
     cdx::err "   Check https://github.com/Cloudanix/artifacts/tree/main/coding-agent-guard )"
     exit 2
   }
 
   cdx::info "fetching ${sha_url}"
-  curl -fsSL -o "${sha_out}" "${sha_url}" || {
+  curl -fsSL -o "${tmp}/${fn}.sha256" "${sha_url}" || {
     cdx::err "SHA256 sidecar download failed: ${sha_url}"
-    cdx::err "  Refusing to install an unverified wheel."
+    cdx::err "  Refusing to install an unverified binary."
     exit 2
   }
 
   cdx::info "verifying SHA256"
   if ! sha256_verify "${tmp}" "${fn}.sha256"; then
     cdx::err "SHA256 mismatch on ${fn}."
-    cdx::err "  The published wheel does not match its sidecar checksum."
+    cdx::err "  The published archive does not match its sidecar checksum."
     cdx::err "  This could indicate corruption in transit or tampering."
     cdx::err "  Aborting install."
     exit 2
   fi
 
-  WHEEL_PATH="${wheel_out}"
+  TARBALL_PATH="${tmp}/${fn}"
 }
 
-# Verify a checksum sidecar in coreutils format. Tries sha256sum
-# (Linux default), falls back to shasum (macOS default).
+# Verify a checksum sidecar in coreutils format. Tries sha256sum (Linux
+# default), falls back to shasum (macOS default).
 sha256_verify() {
   local dir="$1"
   local fname="$2"
@@ -246,59 +261,65 @@ sha256_verify() {
   fi
 }
 
-# ─── venv + pip ─────────────────────────────────────────────────────
+# Extract the tarball into CDX_TMPDIR and locate the cloudanix-guard
+# binary. Sets the global BINARY_PATH.
+extract_binary() {
+  local tarball="$1"
+  local dest="${CDX_TMPDIR}/extract"
+  mkdir -p "${dest}"
+  tar -xzf "${tarball}" -C "${dest}" || cdx::die "failed to extract ${tarball}"
 
-ensure_venv() {
-  local py="$1"
-  if [ -d "${INSTALL_DIR}" ] && [ -x "${INSTALL_DIR}/bin/python" ]; then
-    cdx::info "reusing existing venv at ${INSTALL_DIR}"
-    return 0
+  local bin="${dest}/${PRODUCT}"
+  if [ ! -f "${bin}" ]; then
+    # The archive layout is flat, but fall back to a search in case a
+    # future release wraps the binary in a directory.
+    bin="$(find "${dest}" -type f -name "${PRODUCT}" 2>/dev/null | head -n1)"
   fi
-  cdx::info "creating venv at ${INSTALL_DIR}"
-  mkdir -p "$(dirname "${INSTALL_DIR}")"
-  "${py}" -m venv "${INSTALL_DIR}" \
-    || cdx::die "venv creation failed at ${INSTALL_DIR}"
-  cdx::pip "${INSTALL_DIR}/bin/python" install --quiet --upgrade pip \
-    || cdx::warn "pip self-upgrade inside venv failed (continuing)"
+  [ -n "${bin}" ] && [ -f "${bin}" ] \
+    || cdx::die "could not find '${PRODUCT}' binary inside the archive"
+  BINARY_PATH="${bin}"
 }
 
-pip_install_local() {
-  local venv_dir="$1"
-  local wheel="$2"
-  cdx::info "pip install ${wheel}"
-  cdx::pip "${venv_dir}/bin/python" install --quiet --upgrade --force-reinstall "${wheel}" \
-    || cdx::die "pip install failed"
-}
-
-# ─── stable launcher shim ───────────────────────────────────────────
+# ─── install the binary at the stable launcher path ─────────────────
 #
-# Codex CLI hashes the exact path of every hook command and rejects
-# unknown handlers. Without a stable shim, every `cloudanix-guard
-# install codex` after a re-install picks up a new venv-relative path
-# and Codex demands re-approval. The shim makes that pain go away:
-# the path stays at ~/.cloudanix-guard/bin/cloudanix-guard for the
-# life of the install, regardless of where pip drops the venv.
+# The binary lives at ~/.cloudanix-guard/bin/cloudanix-guard for the
+# life of the install. Coding agents (especially Codex, which
+# trust-hashes the exact path of every hook command) record THIS path,
+# so keeping it stable across upgrades means replacing the binary in
+# place never forces a re-approval.
 
-install_launcher() {
-  local venv_dir="$1"
-  local launcher_path="$2"
+install_binary() {
+  local src="$1"
+  local dest="$2"
 
-  mkdir -p "$(dirname "${launcher_path}")"
-  cat > "${launcher_path}" <<EOF
-#!/usr/bin/env bash
-# Cloudanix Guard launcher shim. Generated by the installer; do not edit.
-# Points at the active venv so subsequent pip-upgrades don't invalidate
-# the path your coding agent has on file.
-exec "${venv_dir}/bin/cloudanix-guard" "\$@"
-EOF
-  chmod 0755 "${launcher_path}"
-  cdx::info "wrote launcher shim: ${launcher_path}"
+  mkdir -p "$(dirname "${dest}")"
+  # Replace in place so the stable path is preserved across upgrades.
+  cp -f "${src}" "${dest}" || cdx::die "failed to install binary to ${dest}"
+  chmod 0755 "${dest}"
+
+  # macOS: best-effort clear the quarantine attribute so Gatekeeper
+  # doesn't block first run. No-op / harmless on Linux.
+  if [ "${CDX_OS}" = "darwin" ] && command -v xattr >/dev/null 2>&1; then
+    xattr -d com.apple.quarantine "${dest}" >/dev/null 2>&1 || true
+  fi
+
+  cdx::info "wrote binary: ${dest}"
 
   # Friendly note if the launcher isn't on PATH.
-  if ! printf ':%s:' "${PATH}" | grep -q ":${LAUNCHER_DIR}:"; then
-    cdx::warn "${LAUNCHER_DIR} is not on your \$PATH"
+  if ! printf ':%s:' "${PATH}" | grep -q ":${BIN_DIR}:"; then
+    cdx::warn "${BIN_DIR} is not on your \$PATH"
     cdx::warn "  Add this to your shell profile (~/.bashrc, ~/.zshrc):"
-    cdx::warn "    export PATH=\"${LAUNCHER_DIR}:\$PATH\""
+    cdx::warn "    export PATH=\"${BIN_DIR}:\$PATH\""
+  fi
+}
+
+# Older Python installs left a venv at ~/.cloudanix-guard/venv. The Go
+# binary doesn't use it; mention it but don't delete it — that's the
+# user's call.
+note_legacy_venv() {
+  local venv="${INSTALL_DIR}/venv"
+  if [ -d "${venv}" ]; then
+    cdx::info "note: a previous Python install's venv at ${venv} is no longer used (safe to delete)."
   fi
 }
 
@@ -328,7 +349,7 @@ ${CDX_C_BOLD}Cloudanix Guard is installed.${CDX_C_RESET}
 
        ${launcher} status
 
-For docs: https://github.com/Cloudanix/cloudanix-coding-agent-guard
+For docs: https://install.cloudanix.com
 
 EOF
 }
