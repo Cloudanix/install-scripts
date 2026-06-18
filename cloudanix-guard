@@ -15,6 +15,9 @@
 #   CLOUDANIX_INSTALL_DIR     Base install dir. Defaults to
 #                             ~/.cloudanix-guard . The binary lands at
 #                             <dir>/bin/cloudanix-guard .
+#   CLOUDANIX_NO_MODIFY_PATH  Set to "1" to skip adding the install dir to
+#                             your shell PATH; the installer then just prints
+#                             the line to add manually.
 #   NO_COLOR                  Disable colour output.
 #
 # Dev-only overrides (require CLOUDANIX_INSTALL_DEV=1):
@@ -142,6 +145,9 @@ main() {
   install_binary "${BINARY_PATH}" "${LAUNCHER_PATH}"
   cdx::ok "installed: ${LAUNCHER_PATH}"
   note_legacy_venv
+
+  cdx::step "Configuring PATH"
+  ensure_on_path
 
   cdx::step "Next steps"
   print_next_steps "${LAUNCHER_PATH}"
@@ -304,13 +310,88 @@ install_binary() {
   fi
 
   cdx::info "wrote binary: ${dest}"
+}
 
-  # Friendly note if the launcher isn't on PATH.
-  if ! printf ':%s:' "${PATH}" | grep -q ":${BIN_DIR}:"; then
-    cdx::warn "${BIN_DIR} is not on your \$PATH"
-    cdx::warn "  Add this to your shell profile (~/.bashrc, ~/.zshrc):"
-    cdx::warn "    export PATH=\"${BIN_DIR}:\$PATH\""
+# ─── PATH wiring (multi-shell) ──────────────────────────────────────
+#
+# The binary installs to ~/.cloudanix-guard/bin, which is almost never on a
+# fresh machine's PATH — so a bare `cloudanix-guard` returns "command not
+# found" even though the install succeeded (the agent hooks are unaffected:
+# they invoke the binary by absolute path). Append the right line, with the
+# right syntax, to the rc the user's shell actually reads:
+#
+#   zsh   → ~/.zshrc                                   export PATH=...
+#   bash  → ~/.bash_profile (macOS) / ~/.bashrc (Linux) export PATH=...
+#   fish  → ~/.config/fish/config.fish                 fish_add_path ...
+#   else  → ~/.profile (POSIX login fallback)          export PATH=...
+#
+# Idempotent (skips if BIN_DIR is already referenced). Opt out with
+# CLOUDANIX_NO_MODIFY_PATH=1; falls back to printing the line if it can't
+# determine the shell or write the file.
+ensure_on_path() {
+  # Already resolvable in this process → future shells inherit it; done.
+  if printf ':%s:' "${PATH}" | grep -q ":${BIN_DIR}:"; then
+    cdx::ok "${BIN_DIR} is already on your PATH"
+    return 0
   fi
+
+  if [ -n "${CLOUDANIX_NO_MODIFY_PATH:-}" ]; then
+    cdx::info "CLOUDANIX_NO_MODIFY_PATH set — not editing your shell profile."
+    _print_path_instructions
+    return 0
+  fi
+
+  local shell_name rc=""
+  shell_name="$(basename "${SHELL:-}")"
+  case "${shell_name}" in
+    zsh)  rc="${ZDOTDIR:-${HOME}}/.zshrc" ;;
+    bash) [ "${CDX_OS}" = "darwin" ] && rc="${HOME}/.bash_profile" || rc="${HOME}/.bashrc" ;;
+    fish) rc="${HOME}/.config/fish/config.fish" ;;
+    *)    rc="${HOME}/.profile" ;;  # sh / dash / ksh / unknown
+  esac
+
+  local line
+  if [ "${shell_name}" = "fish" ]; then
+    line="fish_add_path \"${BIN_DIR}\""
+  else
+    line="export PATH=\"${BIN_DIR}:\$PATH\""
+  fi
+
+  if _append_path_line "${rc}" "${line}"; then
+    cdx::info "open a new terminal (or: source \"${rc}\"), then run: ${PRODUCT} --version"
+  else
+    _print_path_instructions
+  fi
+}
+
+# Append the PATH line to an rc file, idempotently. Returns 0 if the line is
+# present afterwards (added or already there), 1 if the file couldn't be written.
+_append_path_line() {
+  local rc="$1" line="$2"
+  local marker="# added by cloudanix-guard installer"
+
+  mkdir -p "$(dirname "${rc}")" 2>/dev/null || true
+
+  if [ -f "${rc}" ] && grep -qF "${BIN_DIR}" "${rc}" 2>/dev/null; then
+    cdx::info "PATH already configured in ${rc}"
+    return 0
+  fi
+
+  if printf '\n%s\n%s\n' "${marker}" "${line}" >>"${rc}" 2>/dev/null; then
+    cdx::ok "added ${BIN_DIR} to PATH in ${rc}"
+    return 0
+  fi
+
+  cdx::warn "couldn't write ${rc}"
+  return 1
+}
+
+# Print the manual PATH instructions for both POSIX shells and fish.
+_print_path_instructions() {
+  cdx::warn "${BIN_DIR} is not on your \$PATH. Add it to your shell profile,"
+  cdx::warn "then restart your shell (or open a new terminal):"
+  cdx::warn "    bash / zsh:  export PATH=\"${BIN_DIR}:\$PATH\""
+  cdx::warn "    fish:        fish_add_path \"${BIN_DIR}\""
 }
 
 # Older Python installs left a venv at ~/.cloudanix-guard/venv. The Go
