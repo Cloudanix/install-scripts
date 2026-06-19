@@ -1,0 +1,22 @@
+# Cloudanix install-scripts — CODEOWNERS
+#
+# This repo is PUBLIC and serves `install.cloudanix.com` (curl | bash).
+# A bad change here ships straight to every customer's install path, so
+# every PR needs review from one of the listed owners. Combined with
+# branch protection's `enforce_admins = true` (admins cannot bypass),
+# this enforces a one-step review gate before anything lands on `main`.
+#
+# Syntax: <path-glob>  <github-handle> [more-handles...]
+# https://docs.github.com/repos/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Catch-all — applies to every file unless overridden by a later rule.
+*  @taurusismysign
+
+# Security-sensitive areas — the actual installer surface customers run,
+# plus the served landing page and CI. Same owner today; placeholder for
+# when more reviewers join.
+/cloudanix-guard       @taurusismysign
+/lib/                  @taurusismysign
+/index.html            @taurusismysign
+/CNAME                 @taurusismysign
+/.github/              @taurusismysign
