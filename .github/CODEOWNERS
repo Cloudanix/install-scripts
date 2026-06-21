@@ -15,7 +15,7 @@
 # Security-sensitive areas — the actual installer surface customers run,
 # plus the served landing page and CI. Same owner today; placeholder for
 # when more reviewers join.
-/cloudanix-guard       @taurusismysign
+/cdxai       @taurusismysign
 /lib/                  @taurusismysign
 /index.html            @taurusismysign
 /CNAME                 @taurusismysign

@@ -1,6 +1,6 @@
 # Deploy this repo's content to GitHub Pages on every push to main.
 # The repo root is published as-is:
-#   ./cloudanix-guard   →  install.cloudanix.com/cloudanix-guard
+#   ./cdxai   →  install.cloudanix.com/cdxai
 #   ./lib/common    →  install.cloudanix.com/lib/common
 #   ./index.html        →  install.cloudanix.com/
 
@@ -34,7 +34,7 @@ jobs:
       - name: Sanity-check the install scripts are executable
         run: |
           set -euo pipefail
-          for f in cloudanix-guard; do
+          for f in cdxai; do
             [ -x "$f" ] || { echo "$f is not executable"; exit 1; }
           done
 

@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Cloudanix installers — shared helpers sourced by each product
-# installer (./cloudanix-guard, etc.).
+# installer (./cdxai, etc.).
 #
 # Provides:
 #   - `cdx::info`, `cdx::warn`, `cdx::err`, `cdx::ok` — coloured stderr
@@ -65,9 +65,9 @@ cdx::require_cmd() {
 }
 
 # Echo a python executable >= 3.9 found on PATH, or die.
-# Honours an explicit CLOUDANIX_PYTHON if set.
+# Honours an explicit CDXAI_PYTHON if set.
 cdx::python_bin() {
-  local override="${CLOUDANIX_PYTHON:-}"
+  local override="${CDXAI_PYTHON:-}"
   local candidates=()
   if [ -n "$override" ]; then
     candidates+=("$override")
@@ -81,7 +81,7 @@ cdx::python_bin() {
       return 0
     fi
   done
-  cdx::die "no Python ≥ 3.9 found on PATH. Tried: ${candidates[*]}. Set CLOUDANIX_PYTHON=/path/to/python to override."
+  cdx::die "no Python ≥ 3.9 found on PATH. Tried: ${candidates[*]}. Set CDXAI_PYTHON=/path/to/python to override."
 }
 
 # Internal: returns 0 iff $1 is python ≥ 3.9.
@@ -121,11 +121,11 @@ cdx::is_interactive() {
 }
 
 # Y/n prompt with default Y.
-# In non-interactive contexts, auto-answers yes UNLESS CLOUDANIX_ASSUME_NO=1.
+# In non-interactive contexts, auto-answers yes UNLESS CDXAI_ASSUME_NO=1.
 cdx::confirm() {
   local prompt="$1"
   if ! cdx::is_interactive; then
-    if [ "${CLOUDANIX_ASSUME_NO:-}" = "1" ]; then
+    if [ "${CDXAI_ASSUME_NO:-}" = "1" ]; then
       return 1
     fi
     return 0
@@ -166,7 +166,7 @@ cdx::ensure_tmpdir() {
 # ─── required env var helper ───────────────────────────────────────
 
 # Read a required env var; if missing/empty, print a helpful error and die.
-# Usage: token=$(cdx::resolve_token CLOUDANIX_INSTALL_TOKEN "Get one at https://console.cloudanix.com/install-token")
+# Usage: token=$(cdx::resolve_token CDXAI_INSTALL_TOKEN "Get one at https://console.cloudanix.com/install-token")
 cdx::resolve_token() {
   local varname="$1"
   local where="${2:-}"
