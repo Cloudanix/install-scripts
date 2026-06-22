@@ -4,7 +4,7 @@ One-line installers for Cloudanix products. Served at
 **[install.cloudanix.com](https://install.cloudanix.com)**.
 
 ```bash
-curl -fsSL https://install.cloudanix.com/cloudanix-guard | bash
+curl -fsSL https://install.cloudanix.com/cdxai | bash
 ```
 
 > **Env vars go on the `bash` side of the pipe**, not on `curl`. Vars
@@ -36,28 +36,28 @@ live in their own repositories and carry their own licenses.
 
 | Product            | URL                                          |
 |--------------------|----------------------------------------------|
-| Cloudanix Guard    | `install.cloudanix.com/cloudanix-guard`      |
+| Cloudanix Guard    | `install.cloudanix.com/cdxai`      |
 
 ---
 
 ## How a customer installs Cloudanix Guard
 
 ```bash
-curl -fsSL https://install.cloudanix.com/cloudanix-guard | bash
+curl -fsSL https://install.cloudanix.com/cdxai | bash
 ```
 
-What that does (paraphrased from the [script itself](./cloudanix-guard)):
+What that does (paraphrased from the [script itself](./cdxai)):
 
 1. Verifies `curl` and `tar` are available and detects your OS/arch.
 2. Downloads the matching release archive
-   (`cloudanix-guard_<version>_<os>_<arch>.tar.gz`) + its SHA256
+   (`cdxai_<version>_<os>_<arch>.tar.gz`) + its SHA256
    sidecar from
    `github.com/Cloudanix/artifacts/raw/main/coding-agent-guard/`.
 3. Verifies the archive against its SHA256 — aborts on mismatch.
-4. Extracts the self-contained `cloudanix-guard` binary — no Python,
+4. Extracts the self-contained `cdxai` binary — no Python,
    no runtime to manage.
 5. Installs it at the stable path
-   `~/.cloudanix-guard/bin/cloudanix-guard`, so upgrades replace the
+   `~/.cdxai/bin/cdxai`, so upgrades replace the
    binary in place and never invalidate paths other tools have
    registered (e.g. Codex's hook trust-hash).
 6. Prints next-step instructions, including how to wire the guard
@@ -66,12 +66,12 @@ What that does (paraphrased from the [script itself](./cloudanix-guard)):
 ### Pin a version
 
 ```bash
-curl -fsSL https://install.cloudanix.com/cloudanix-guard \
-  | CLOUDANIX_VERSION="0.1.1" bash
+curl -fsSL https://install.cloudanix.com/cdxai \
+  | CDXAI_VERSION="0.1.1" bash
 ```
 
 The named version must exist in `Cloudanix/artifacts/coding-agent-guard/`
-as `cloudanix-guard_<version>_<os>_<arch>.tar.gz` (with a matching
+as `cdxai_<version>_<os>_<arch>.tar.gz` (with a matching
 `.sha256` sidecar) for your platform. Otherwise the installer aborts
 with a 404 from the artifact CDN.
 
@@ -92,12 +92,12 @@ with a 404 from the artifact CDN.
 - **Strict mode + ShellCheck on CI** — `set -euo pipefail`; no
   unguarded `command-not-found`; no implicit word-split bugs.
 - **Dev-only env-var overrides are gated** behind
-  `CLOUDANIX_INSTALL_DEV=1`. Without that flag, the overrides
-  (`CLOUDANIX_LOCAL_LIB`, `CLOUDANIX_LOCAL_BINARY`,
-  `CLOUDANIX_LOCAL_TARBALL`, `CLOUDANIX_INSTALL_BASE`,
-  `CLOUDANIX_ARTIFACTS_URL`) refuse to apply — closes a phishing path
+  `CDXAI_INSTALL_DEV=1`. Without that flag, the overrides
+  (`CDXAI_LOCAL_LIB`, `CDXAI_LOCAL_BINARY`,
+  `CDXAI_LOCAL_TARBALL`, `CDXAI_INSTALL_BASE`,
+  `CDXAI_ARTIFACTS_URL`) refuse to apply — closes a phishing path
   where someone tricks a developer into pasting
-  `CLOUDANIX_LOCAL_BINARY=/tmp/evil curl … | bash`.
+  `CDXAI_LOCAL_BINARY=/tmp/evil curl … | bash`.
 
 Found a bug? Open an issue on this repo. For sensitive disclosures
 contact `security@cloudanix.com`.

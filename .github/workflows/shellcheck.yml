@@ -29,7 +29,7 @@ jobs:
         with:
           severity: warning
           # Scan everything that looks like a bash script. The product
-          # installers (cloudanix-guard, etc.) have no extension and
+          # installers (cdxai, etc.) have no extension and
           # are at the repo root; the lib lives under _lib/.
           scandir: '.'
-          additional_files: 'cloudanix-guard'
+          additional_files: 'cdxai'

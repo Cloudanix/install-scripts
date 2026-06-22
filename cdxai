@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cloudanix Guard — one-line installer.
 #
-#   curl -fsSL https://install.cloudanix.com/cloudanix-guard | bash
+#   curl -fsSL https://install.cloudanix.com/cdxai | bash
 #
 # Installs the Cloudanix Guard binary — a single, self-contained
 # executable (no Python, no runtime to manage). The binary is published
@@ -9,50 +9,50 @@
 # verified locally against a SHA256 sidecar before it is installed.
 #
 # Optional env:
-#   CLOUDANIX_VERSION         Pin a specific version, e.g. "1.0.0".
+#   CDXAI_VERSION         Pin a specific version, e.g. "1.0.0".
 #                             Defaults to "latest" (the alias updated on
 #                             every release).
-#   CLOUDANIX_INSTALL_DIR     Base install dir. Defaults to
-#                             ~/.cloudanix-guard . The binary lands at
-#                             <dir>/bin/cloudanix-guard .
-#   CLOUDANIX_NO_MODIFY_PATH  Set to "1" to skip adding the install dir to
+#   CDXAI_INSTALL_DIR     Base install dir. Defaults to
+#                             ~/.cdxai . The binary lands at
+#                             <dir>/bin/cdxai .
+#   CDXAI_NO_MODIFY_PATH  Set to "1" to skip adding the install dir to
 #                             your shell PATH; the installer then just prints
 #                             the line to add manually.
 #   NO_COLOR                  Disable colour output.
 #
-# Dev-only overrides (require CLOUDANIX_INSTALL_DEV=1):
-#   CLOUDANIX_INSTALL_DEV     Set to "1" to enable any of:
-#   CLOUDANIX_LOCAL_LIB         Path to a local lib/common
-#   CLOUDANIX_LOCAL_BINARY      Path to a prebuilt binary (skips download)
-#   CLOUDANIX_LOCAL_TARBALL     Path to a local release tarball (skips download)
-#   CLOUDANIX_INSTALL_BASE      Override install.cloudanix.com URL
-#   CLOUDANIX_ARTIFACTS_URL     Override the artifacts CDN URL
+# Dev-only overrides (require CDXAI_INSTALL_DEV=1):
+#   CDXAI_INSTALL_DEV     Set to "1" to enable any of:
+#   CDXAI_LOCAL_LIB         Path to a local lib/common
+#   CDXAI_LOCAL_BINARY      Path to a prebuilt binary (skips download)
+#   CDXAI_LOCAL_TARBALL     Path to a local release tarball (skips download)
+#   CDXAI_INSTALL_BASE      Override install.cloudanix.com URL
+#   CDXAI_ARTIFACTS_URL     Override the artifacts CDN URL
 #
 # Exit codes:
 #   0   success
 #   1   user-facing error (unsupported OS, missing tools, dev override
-#       used without CLOUDANIX_INSTALL_DEV=1, etc.)
+#       used without CDXAI_INSTALL_DEV=1, etc.)
 #   2   network / artifact integrity error (download failed or SHA256
 #       mismatch)
 #
 # This installer is open source (MIT). Audit at:
-#   https://github.com/Cloudanix/install-scripts/blob/main/cloudanix-guard
+#   https://github.com/Cloudanix/install-scripts/blob/main/cdxai
 
 set -euo pipefail
 
 # ─── dev-only override gating ───────────────────────────────────────
 #
 # Phishing defence: a customer can be tricked into pasting
-#   CLOUDANIX_LOCAL_BINARY=/tmp/evil curl ... | bash
-# into their terminal. Requiring CLOUDANIX_INSTALL_DEV=1 makes it
+#   CDXAI_LOCAL_BINARY=/tmp/evil curl ... | bash
+# into their terminal. Requiring CDXAI_INSTALL_DEV=1 makes it
 # obvious that something dev-only is happening.
 
-if [ -z "${CLOUDANIX_INSTALL_DEV:-}" ]; then
-  for _v in CLOUDANIX_LOCAL_LIB CLOUDANIX_LOCAL_BINARY CLOUDANIX_LOCAL_TARBALL CLOUDANIX_INSTALL_BASE CLOUDANIX_ARTIFACTS_URL; do
+if [ -z "${CDXAI_INSTALL_DEV:-}" ]; then
+  for _v in CDXAI_LOCAL_LIB CDXAI_LOCAL_BINARY CDXAI_LOCAL_TARBALL CDXAI_INSTALL_BASE CDXAI_ARTIFACTS_URL; do
     eval _val="\${${_v}:-}"
     if [ -n "${_val:-}" ]; then
       echo "error: ${_v} is a development-only override." >&2
-      echo "       Set CLOUDANIX_INSTALL_DEV=1 to enable it." >&2
+      echo "       Set CDXAI_INSTALL_DEV=1 to enable it." >&2
       exit 1
     fi
   done
@@ -60,11 +60,11 @@ fi
 
 # ─── source the shared helpers ──────────────────────────────────────
 
-INSTALL_BASE="${CLOUDANIX_INSTALL_BASE:-https://install.cloudanix.com}"
+INSTALL_BASE="${CDXAI_INSTALL_BASE:-https://install.cloudanix.com}"
 
-if [ -n "${CLOUDANIX_LOCAL_LIB:-}" ] && [ -f "${CLOUDANIX_LOCAL_LIB}" ]; then
+if [ -n "${CDXAI_LOCAL_LIB:-}" ] && [ -f "${CDXAI_LOCAL_LIB}" ]; then
   # shellcheck source=lib/common
-  source "${CLOUDANIX_LOCAL_LIB}"
+  source "${CDXAI_LOCAL_LIB}"
 else
   # Fetch common to a real temp file so we can:
   #   1. Check the HTTP fetch succeeded.
@@ -96,17 +96,17 @@ cdx::init_strict
 
 # ─── product-specific config ────────────────────────────────────────
 
-readonly PRODUCT="cloudanix-guard"
-INSTALL_DIR="${CLOUDANIX_INSTALL_DIR:-${HOME}/.cloudanix-guard}"
+readonly PRODUCT="cdxai"
+INSTALL_DIR="${CDXAI_INSTALL_DIR:-${HOME}/.cdxai}"
 readonly INSTALL_DIR
 readonly BIN_DIR="${INSTALL_DIR}/bin"
 readonly LAUNCHER_PATH="${BIN_DIR}/${PRODUCT}"
 
 # Public CDN that holds the release binaries. Override only via the
-# dev-gated CLOUDANIX_ARTIFACTS_URL above.
-readonly ARTIFACTS_URL="${CLOUDANIX_ARTIFACTS_URL:-https://github.com/Cloudanix/artifacts/raw/main/coding-agent-guard}"
+# dev-gated CDXAI_ARTIFACTS_URL above.
+readonly ARTIFACTS_URL="${CDXAI_ARTIFACTS_URL:-https://github.com/Cloudanix/artifacts/raw/main/coding-agent-guard}"
 
-VERSION="${CLOUDANIX_VERSION:-latest}"
+VERSION="${CDXAI_VERSION:-latest}"
 
 # Set by the resolve step (download+extract, or a dev-provided local
 # binary/tarball). Always ends up pointing at the executable to install.
@@ -144,7 +144,7 @@ main() {
   cdx::step "Installing"
   install_binary "${BINARY_PATH}" "${LAUNCHER_PATH}"
   cdx::ok "installed: ${LAUNCHER_PATH}"
-  note_legacy_venv
+  note_legacy_install
 
   cdx::step "Configuring PATH"
   ensure_on_path
@@ -158,20 +158,20 @@ main() {
 resolve_binary() {
   local version="$1"
 
-  if [ -n "${CLOUDANIX_LOCAL_BINARY:-}" ]; then
-    [ -f "${CLOUDANIX_LOCAL_BINARY}" ] \
-      || cdx::die "CLOUDANIX_LOCAL_BINARY=${CLOUDANIX_LOCAL_BINARY} is not a file"
-    cdx::warn "using local binary (skipping download + checksum): ${CLOUDANIX_LOCAL_BINARY}"
-    BINARY_PATH="${CLOUDANIX_LOCAL_BINARY}"
+  if [ -n "${CDXAI_LOCAL_BINARY:-}" ]; then
+    [ -f "${CDXAI_LOCAL_BINARY}" ] \
+      || cdx::die "CDXAI_LOCAL_BINARY=${CDXAI_LOCAL_BINARY} is not a file"
+    cdx::warn "using local binary (skipping download + checksum): ${CDXAI_LOCAL_BINARY}"
+    BINARY_PATH="${CDXAI_LOCAL_BINARY}"
     return 0
   fi
 
   local tarball
-  if [ -n "${CLOUDANIX_LOCAL_TARBALL:-}" ]; then
-    [ -f "${CLOUDANIX_LOCAL_TARBALL}" ] \
-      || cdx::die "CLOUDANIX_LOCAL_TARBALL=${CLOUDANIX_LOCAL_TARBALL} is not a file"
-    cdx::warn "using local tarball (skipping download + checksum): ${CLOUDANIX_LOCAL_TARBALL}"
-    tarball="${CLOUDANIX_LOCAL_TARBALL}"
+  if [ -n "${CDXAI_LOCAL_TARBALL:-}" ]; then
+    [ -f "${CDXAI_LOCAL_TARBALL}" ] \
+      || cdx::die "CDXAI_LOCAL_TARBALL=${CDXAI_LOCAL_TARBALL} is not a file"
+    cdx::warn "using local tarball (skipping download + checksum): ${CDXAI_LOCAL_TARBALL}"
+    tarball="${CDXAI_LOCAL_TARBALL}"
   else
     download_tarball "${version}"   # sets TARBALL_PATH
     tarball="${TARBALL_PATH}"
@@ -195,7 +195,7 @@ _goarch() {
 # see the cdx::ensure_tmpdir comment on why the tmpdir trap must stay in
 # main()'s shell.
 #
-# Archives are named cloudanix-guard_<version>_<os>_<arch>.tar.gz (the
+# Archives are named cdxai_<version>_<os>_<arch>.tar.gz (the
 # goreleaser convention) with a sibling .sha256 sidecar in coreutils
 # format ("<hex>  <name>"). We download both and verify locally — if the
 # public mirror is ever tampered with and a malicious archive is pushed
@@ -228,7 +228,7 @@ download_tarball() {
   cdx::info "fetching ${url}"
   curl -fsSL -o "${tmp}/${fn}" "${url}" || {
     cdx::err "binary download failed: ${url}"
-    cdx::err "  (Is CLOUDANIX_VERSION=${tag} published for ${CDX_OS}/${arch}?"
+    cdx::err "  (Is CDXAI_VERSION=${tag} published for ${CDX_OS}/${arch}?"
     cdx::err "   Check https://github.com/Cloudanix/artifacts/tree/main/coding-agent-guard )"
     exit 2
   }
@@ -267,7 +267,7 @@ sha256_verify() {
   fi
 }
 
-# Extract the tarball into CDX_TMPDIR and locate the cloudanix-guard
+# Extract the tarball into CDX_TMPDIR and locate the cdxai
 # binary. Sets the global BINARY_PATH.
 extract_binary() {
   local tarball="$1"
@@ -288,7 +288,7 @@ extract_binary() {
 
 # ─── install the binary at the stable launcher path ─────────────────
 #
-# The binary lives at ~/.cloudanix-guard/bin/cloudanix-guard for the
+# The binary lives at ~/.cdxai/bin/cdxai for the
 # life of the install. Coding agents (especially Codex, which
 # trust-hashes the exact path of every hook command) record THIS path,
 # so keeping it stable across upgrades means replacing the binary in
@@ -314,8 +314,8 @@ install_binary() {
 
 # ─── PATH wiring (multi-shell) ──────────────────────────────────────
 #
-# The binary installs to ~/.cloudanix-guard/bin, which is almost never on a
-# fresh machine's PATH — so a bare `cloudanix-guard` returns "command not
+# The binary installs to ~/.cdxai/bin, which is almost never on a
+# fresh machine's PATH — so a bare `cdxai` returns "command not
 # found" even though the install succeeded (the agent hooks are unaffected:
 # they invoke the binary by absolute path). Append the right line, with the
 # right syntax, to the rc the user's shell actually reads:
@@ -326,7 +326,7 @@ install_binary() {
 #   else  → ~/.profile (POSIX login fallback)          export PATH=...
 #
 # Idempotent (skips if BIN_DIR is already referenced). Opt out with
-# CLOUDANIX_NO_MODIFY_PATH=1; falls back to printing the line if it can't
+# CDXAI_NO_MODIFY_PATH=1; falls back to printing the line if it can't
 # determine the shell or write the file.
 ensure_on_path() {
   # Already resolvable in this process → future shells inherit it; done.
@@ -335,8 +335,8 @@ ensure_on_path() {
     return 0
   fi
 
-  if [ -n "${CLOUDANIX_NO_MODIFY_PATH:-}" ]; then
-    cdx::info "CLOUDANIX_NO_MODIFY_PATH set — not editing your shell profile."
+  if [ -n "${CDXAI_NO_MODIFY_PATH:-}" ]; then
+    cdx::info "CDXAI_NO_MODIFY_PATH set — not editing your shell profile."
     _print_path_instructions
     return 0
   fi
@@ -368,7 +368,7 @@ ensure_on_path() {
 # present afterwards (added or already there), 1 if the file couldn't be written.
 _append_path_line() {
   local rc="$1" line="$2"
-  local marker="# added by cloudanix-guard installer"
+  local marker="# added by cdxai installer"
 
   mkdir -p "$(dirname "${rc}")" 2>/dev/null || true
 
@@ -394,13 +394,14 @@ _print_path_instructions() {
   cdx::warn "    fish:        fish_add_path \"${BIN_DIR}\""
 }
 
-# Older Python installs left a venv at ~/.cloudanix-guard/venv. The Go
-# binary doesn't use it; mention it but don't delete it — that's the
-# user's call.
-note_legacy_venv() {
-  local venv="${INSTALL_DIR}/venv"
-  if [ -d "${venv}" ]; then
-    cdx::info "note: a previous Python install's venv at ${venv} is no longer used (safe to delete)."
+# A prior install lived at ~/.cloudanix-guard (the binary was renamed
+# cloudanix-guard -> cdxai and the install dir moved to ~/.cdxai). Note any
+# leftover old install dir — and the even-older Python venv inside it — but
+# don't delete it; that's the user's call (re-run `cdxai configure` first).
+note_legacy_install() {
+  local legacy="${HOME}/.cloudanix-guard"
+  if [ -d "${legacy}" ]; then
+    cdx::info "note: a previous install at ${legacy} is superseded by ${INSTALL_DIR} (safe to delete after you re-run 'cdxai configure')."
   fi
 }
 
