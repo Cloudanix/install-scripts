@@ -56,7 +56,7 @@ SERVICE_ACCOUNT=""
 IDENTIFIER=""
 LABEL_OWNER="cloudanix"
 
-die() { echo "error: $*" >&2; exit "${2:-1}"; }
+die() { echo "error: $1" >&2; exit "${2:-1}"; }
 info() { echo "==> $*"; }
 
 # Under `curl | bash` there is no script file to read the header from, so the help
