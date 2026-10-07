@@ -42,9 +42,11 @@
 set -euo pipefail
 
 SECRET_NAME="cdx_auth_config"
+# secretmanager.secretAccessor is granted resource-scoped on cdx_auth_config in
+# grant_permissions (least privilege); it is intentionally NOT here, since a
+# project-level binding would give read access to every secret in the project.
 ROLES=(
   "roles/cloudkms.cryptoKeyDecrypter"
-  "roles/secretmanager.secretAccessor"
   "roles/iam.serviceAccountUser"
   "roles/cloudbuild.workerPoolUser"
 )
