@@ -38,6 +38,23 @@ live in their own repositories and carry their own licenses.
 |--------------------|----------------------------------------------|
 | Cloudanix Guard    | `install.cloudanix.com/cdxai`      |
 | Image Scanner for Google Cloud Build | `install.cloudanix.com/plugins/googlecloudbuild/install.sh` |
+| Image Scanner Jenkins plugin | `install.cloudanix.com/plugins/jenkins/cloudanix-image-scanner-<version>.hpi` |
+
+---
+
+## Image Scanner Jenkins plugin
+
+Download the `.hpi` (the Cloudanix console links the current version) and
+install it via **Manage Jenkins → Plugins → Advanced → Deploy Plugin**.
+Requires Jenkins 2.479.3+ and Java 17+. Each release ships a `.sha256`
+sidecar next to it:
+
+```bash
+V=v0.0.11
+curl -fsSLO https://install.cloudanix.com/plugins/jenkins/cloudanix-image-scanner-$V.hpi
+curl -fsSLO https://install.cloudanix.com/plugins/jenkins/cloudanix-image-scanner-$V.hpi.sha256
+shasum -a 256 -c cloudanix-image-scanner-$V.hpi.sha256
+```
 
 ---
 
