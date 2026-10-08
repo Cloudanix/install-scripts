@@ -34,7 +34,7 @@ jobs:
       - name: Sanity-check the install scripts are executable
         run: |
           set -euo pipefail
-          for f in cdxai; do
+          for f in cdxai plugins/googlecloudbuild/install.sh; do
             [ -x "$f" ] || { echo "$f is not executable"; exit 1; }
           done
 

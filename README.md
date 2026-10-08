@@ -37,6 +37,47 @@ live in their own repositories and carry their own licenses.
 | Product            | URL                                          |
 |--------------------|----------------------------------------------|
 | Cloudanix Guard    | `install.cloudanix.com/cdxai`      |
+| Image Scanner for Google Cloud Build | `install.cloudanix.com/plugins/googlecloudbuild/install.sh` |
+| Image Scanner Jenkins plugin | `install.cloudanix.com/plugins/jenkins/cloudanix-image-scanner-<version>.hpi` |
+
+---
+
+## Image Scanner Jenkins plugin
+
+Download the `.hpi` (the Cloudanix console links the current version) and
+install it via **Manage Jenkins → Plugins → Advanced → Deploy Plugin**.
+Requires Jenkins 2.479.3+ and Java 17+. Each release ships a `.sha256`
+sidecar next to it:
+
+```bash
+V=v0.0.11
+curl -fsSLO https://install.cloudanix.com/plugins/jenkins/cloudanix-image-scanner-$V.hpi
+curl -fsSLO https://install.cloudanix.com/plugins/jenkins/cloudanix-image-scanner-$V.hpi.sha256
+shasum -a 256 -c cloudanix-image-scanner-$V.hpi.sha256
+```
+
+---
+
+## Image Scanner for Google Cloud Build
+
+Run in GCP Cloud Shell (or anywhere `gcloud` is authenticated). The Cloudanix
+console fills in the three values for you:
+
+```bash
+curl -fsSL https://install.cloudanix.com/plugins/googlecloudbuild/install.sh | bash -s -- \
+  --project <gcp-project-id> \
+  --service-account <cloud-build-service-account-email> \
+  --identifier <cloudanix-account-identifier>
+```
+
+It stores your Cloudanix credentials in the Secret Manager secret
+`cdx_auth_config` and grants the Cloud Build service account the roles the
+scanner step needs. The **auth token is asked for at a hidden prompt**, never
+passed on the command line, so it stays out of shell history and off disk
+(`CDX_AUTHZ_TOKEN` is honoured for non-interactive runs).
+
+Re-run the same command to upgrade: every step is idempotent, and pressing
+Enter at the token prompt keeps the stored credentials.
 
 ---
 
